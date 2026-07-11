@@ -17,7 +17,6 @@ import json
 import re
 import time
 from collections.abc import Iterable
-from xmlrpc.client import DateTime
 
 from beancount.core.number import Decimal
 from beancount.core.number import ZERO
@@ -25,8 +24,7 @@ from beancount.core.data import Transaction
 
 from fava.ext import FavaExtensionBase
 from fava.helpers import FavaAPIError
-from fava.core.conversion import cost_or_value
-from fava.core.query_shell import QueryShell
+from fava.core.conversion import cost_or_value, AT_VALUE, AT_COST, UNITS
 from fava.context import g
 from .irr import IRR
 
@@ -246,8 +244,12 @@ class PortfolioSummaryInstance:  # pragma: no cover
         result = self.ledger.query_shell.execute_query(query)
         self.dividends_elapsed += time.time() - start
         dividends = ZERO
-        if len(result[2])>0:
-            for row_cost in result[2]:
+
+        # support older bean-query and new beanquery
+        rows = result.rows if hasattr(result, 'rows') else result[2]
+
+        if len(rows)>0:
+            for row_cost in rows:
                 if len(row_cost.dividends.get_positions())==1:
                     dividends+=round(abs(row_cost.dividends.get_positions()[0].units.number),2)
         self.dividend_cache[cache_key] = dividends
@@ -263,10 +265,10 @@ class PortfolioSummaryInstance:  # pragma: no cover
         row['pnl'] = ZERO
         row['dividends'] = ZERO
         date = g.filtered.end_date
-        balance = cost_or_value(node.balance, "at_value", g.ledger.prices, date=date)
-        cost = cost_or_value(node.balance, "at_cost", g.ledger.prices, date=date)
+        balance = cost_or_value(node.balance, AT_VALUE, g.ledger.prices, date=date)
+        cost = cost_or_value(node.balance, AT_COST, g.ledger.prices, date=date)
         #### ADD Units to the report
-        units = cost_or_value(node.balance, "units", g.ledger.prices, date=date)
+        units = cost_or_value(node.balance, UNITS, g.ledger.prices, date=date)
         ### Get row currency
         row_currency = None
         if len(list(units.values())) > 0:
@@ -295,8 +297,12 @@ class PortfolioSummaryInstance:  # pragma: no cover
                 f"convert(value(position) ,'{self.operating_currency}',today()) AS value "
                 f"WHERE currency = '{row_currency}' AND account ='{node.name}' "
                 "ORDER BY currency, cost_date")
+            
+            # support older bean-query and new beanquery
+            rows = result.rows if hasattr(result, 'rows') else result[2]
+                        
             if len(result) == 3:
-                for row_cost,row_value in result[2]:
+                for row_cost,row_value in rows:
                     total_currency_cost+=row_cost.number
                     total_currency_value+=row_value.number
             row["balance"] = round(total_currency_value, 2)
@@ -306,7 +312,17 @@ class PortfolioSummaryInstance:  # pragma: no cover
         if row_currency is not None and row_currency != self.operating_currency:
             try:
                 dict_dates = g.filtered.prices(self.operating_currency,row_currency)
-                if len(dict_dates) >0:
+
+                price_map = g.ledger.prices
+                dict_dates = price_map.forward_pairs.get(
+                    (self.operating_currency, row_currency), []
+                )
+                if not dict_dates:
+                    dict_dates = price_map.forward_pairs.get(
+                        (row_currency, self.operating_currency), []
+                    )
+
+                if dict_dates:
                     row["last-date"] = dict_dates[-1][0]
             except KeyError:
                 pass
