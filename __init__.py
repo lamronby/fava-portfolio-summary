@@ -314,16 +314,12 @@ class PortfolioSummaryInstance:  # pragma: no cover
                 dict_dates = g.filtered.prices(self.operating_currency,row_currency)
 
                 price_map = g.ledger.prices
-                dict_dates = price_map.forward_pairs.get(
-                    (self.operating_currency, row_currency), []
-                )
-                if not dict_dates:
-                    dict_dates = price_map.forward_pairs.get(
-                        (row_currency, self.operating_currency), []
-                    )
 
-                if dict_dates:
-                    row["last-date"] = dict_dates[-1][0]
+                all_prices = price_map.get_all_prices((row_currency, self.operating_currency))
+                if all_prices is None:
+                    all_prices = price_map.get_all_prices((self.operating_currency, row_currency))
+                if all_prices:
+                    row["last-date"] = all_prices[-1][0]                    
             except KeyError:
                 pass
         return row
